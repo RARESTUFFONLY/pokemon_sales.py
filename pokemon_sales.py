@@ -1,54 +1,58 @@
 import streamlit as st
 import requests
-from bs4 import BeautifulSoup
+import xml.etree.ElementTree as ET
 
-st.set_page_config(page_title="Live Pokémon eBay Sales", layout="wide")
-st.title("🔴 Live Pokémon Card Sales on eBay")
+st.set_page_config(page_title="Pokémon eBay Sales (API)", layout="wide")
+st.title("🔴 Live Pokémon Card Sales on eBay (via API)")
 
-st.markdown("Click the button below to load the latest sales.")
+# STEP 2: Replace this with your actual eBay App ID from developer.ebay.com
+EBAY_APP_ID = "AchitEnk-PokemonS-SBX-48e98c9a6-091b2ac8"
 
-def get_sales():
-    url = "https://www.ebay.com/sch/i.html?_nkw=pokemon+card&_sacat=0&LH_Sold=1&LH_Complete=1&_ipg=20"
+def get_ebay_sales():
+    url = "https://svcs.ebay.com/services/search/FindingService/v1"
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                      "AppleWebKit/537.36 (KHTML, like Gecko) "
-                      "Chrome/114.0.0.0 Safari/537.36"
+        "X-EBAY-SOA-OPERATION-NAME": "findCompletedItems",
+        "X-EBAY-SOA-SECURITY-APPNAME": EBAY_APP_ID,
+        "X-EBAY-SOA-REQUEST-DATA-FORMAT": "XML"
     }
-    try:
-        r = requests.get(url, headers=headers, timeout=10)
-        r.raise_for_status()
-    except Exception as e:
-        st.error(f"Failed to load data: {e}")
+    params = {
+        "keywords": "pokemon card",
+        "itemFilter.name": "SoldItemsOnly",
+        "itemFilter.value": "true",
+        "paginationInput.entriesPerPage": "15",
+        "outputSelector": "PictureURLLarge"
+    }
+
+    response = requests.get(url, headers=headers, params=params)
+    if response.status_code != 200:
+        st.error(f"API request failed: {response.status_code}")
         return []
 
-    soup = BeautifulSoup(r.text, "html.parser")
-
-    cards = []
-    for item in soup.select("li.s-item"):
-        title = item.select_one("h3.s-item__title")
-        price = item.select_one(".s-item__price")
-        img = item.select_one(".s-item__image-img")
-        link_tag = item.select_one("a.s-item__link")
-        if title and price and link_tag:
-            cards.append({
-                "title": title.get_text(),
-                "price": price.get_text(),
-                "img": img["src"] if img else "",
-                "url": link_tag["href"]
-            })
-    return cards
+    root = ET.fromstring(response.content)
+    items = []
+    for item in root.findall(".//item"):
+        title = item.findtext("title")
+        price = item.find("sellingStatus/currentPrice").text
+        url = item.findtext("viewItemURL")
+        img = item.findtext("pictureURLLarge")
+        items.append({
+            "title": title,
+            "price": price,
+            "url": url,
+            "img": img or ""
+        })
+    return items
 
 if st.button("Load Latest Sales"):
-    cards = get_sales()
-
-    if not cards:
-        st.warning("No sales found or failed to fetch data.")
+    sales = get_ebay_sales()
+    if not sales:
+        st.warning("No sales found or API limit reached.")
     else:
-        st.write(f"Found {len(cards)} sales:")
-        for card in cards:
-            st.image(card["img"], width=150)
-            st.markdown(f"**[{card['title']}]({card['url']})**")
-            st.markdown(f"💵 {card['price']}")
+        for sale in sales:
+            st.image(sale["img"], width=150)
+            st.markdown(f"**[{sale['title']}]({sale['url']})**")
+            st.markdown(f"💵 ${sale['price']}")
             st.markdown("---")
 else:
-    st.info("Click 'Load Latest Sales' to get the newest Pokémon card sales.")
+    st.info("Click 'Load Latest Sales' to fetch recent Pokémon card sales from eBay.")
+
